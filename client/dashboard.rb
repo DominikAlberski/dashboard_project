@@ -38,7 +38,9 @@ class Dashboard
   end
 
   def drain
-    @view.apply(@queue.pop(true)) while pending_result?
+    loop { @chat.finish if @view.apply(@queue.pop(true)) }
+  rescue ThreadError
+    nil
   end
 
   def pending_result?
@@ -109,6 +111,7 @@ class ViewState
   def apply(event)
     type, value = event
     type == :status ? apply_status(value) : apply_chat(value)
+    type == :chat
   end
 
   def apply_status(payload)
@@ -155,6 +158,7 @@ class ViewState
   end
 
   def label(devices)
+    return "1 device" if devices.size == 1
     "#{devices.size} devices"
   end
 

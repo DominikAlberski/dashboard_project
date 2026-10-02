@@ -107,6 +107,44 @@ class DashboardTest < Minitest::Test
     refute dashboard.state[:thinking]
   end
 
+  def test_two_chats_in_sequence
+    api = FakeApi.new
+    api.gate = Queue.new
+    api.reply = "first"
+    dashboard, = build(api)
+    dashboard.submit("one")
+    wait_until { api.chat_calls == 1 }
+    api.gate << true
+    wait_until { dashboard.pending_result? }
+    dashboard.tick
+    assert_equal "first", dashboard.state[:reply]
+    api.reply = "second"
+    dashboard.submit("two")
+    wait_until { api.chat_calls == 2 }
+    api.gate << true
+    wait_until { dashboard.pending_result? }
+    dashboard.tick
+    assert_equal "second", dashboard.state[:reply]
+    assert_equal 2, api.chat_calls
+  end
+
+  def test_status_returns_to_device_label_after_reply
+    api = FakeApi.new
+    api.gate = Queue.new
+    api.devices = [{ "name" => "pc" }]
+    dashboard, = build(api)
+    dashboard.poll_status
+    dashboard.tick
+    assert_equal "1 device", dashboard.state[:status]
+    dashboard.submit("hi")
+    wait_until { api.chat_calls == 1 }
+    api.gate << true
+    wait_until { dashboard.pending_result? }
+    dashboard.tick
+    assert_equal "1 device", dashboard.state[:status]
+    refute dashboard.state[:thinking]
+  end
+
   def test_chat_error_field_shows_error_text
     api = FakeApi.new
     api.chat_response = { "error" => "bad request" }
