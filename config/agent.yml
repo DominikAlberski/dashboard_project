@@ -1,0 +1,17 @@
+bind: 0.0.0.0
+port: 4567
+scan_range: 192.168.33.0/24
+scan_interval: 30
+ping_timeout: 1
+ports:
+  - 22
+  - 80
+  - 443
+  - 445
+  - 3389
+  - 5900
+  - 11434
+model_host: http://192.168.33.34:11434
+model_name: qwen3.8-ridge-16k:latest
+model_timeout: 170
+devices_file: config/devices.yml

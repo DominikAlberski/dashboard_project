@@ -1,0 +1,9 @@
+#!/usr/bin/env ruby
+require_relative "../agent/registry"
+require_relative "../agent/wol"
+
+root = File.expand_path("..", __dir__)
+registry = Agent::Registry.load(File.join(root, "config/devices.yml"))
+code, message = Agent::Wol.run(ARGV, registry: registry)
+puts message
+exit code

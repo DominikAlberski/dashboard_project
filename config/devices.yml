@@ -1,0 +1,10 @@
+devices:
+  - name: pc
+    mac: "AA:BB:CC:DD:EE:01"
+    ip: 192.168.33.10
+  - name: mac
+    mac: "AA:BB:CC:DD:EE:02"
+    ip: 192.168.33.11
+  - name: printer
+    mac: "AA:BB:CC:DD:EE:03"
+    ip: 192.168.33.12
