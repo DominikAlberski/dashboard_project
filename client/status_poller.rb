@@ -36,13 +36,18 @@ class StatusPoller
   end
 
   def checked(status)
-    valid?(status) ? status : { "error" => "invalid status" }
+    return { "error" => "invalid status" } unless valid?(status)
+    status
   end
 
   def valid?(status)
+    return true if error?(status)
     return false unless status.is_a?(Hash)
-    devices = status["devices"]
-    devices.nil? || valid_devices?(devices)
+    valid_devices?(status["devices"])
+  end
+
+  def error?(status)
+    status.is_a?(Hash) && status["error"]
   end
 
   def valid_devices?(devices)
