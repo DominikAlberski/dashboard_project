@@ -1,9 +1,6 @@
 require "minitest/autorun"
 require "stringio"
 require "json"
-require_relative "../../client/sanitizer"
-require_relative "../../client/api"
-require_relative "../../client/screen"
 require_relative "../../client/dashboard"
 
 class FakeResponse
@@ -62,20 +59,27 @@ end
 
 class FakeApi
   attr_accessor :reply, :devices, :status_error, :chat_error, :gate,
-                :status_response, :chat_response
-  attr_reader :status_calls, :chat_calls, :last_text
+                :status_response, :chat_response, :status_delay, :clock
+  attr_reader :status_calls, :chat_calls, :last_text, :status_starts
 
   def initialize
     @status_calls = 0
     @chat_calls = 0
+    @status_starts = []
     @reply = "ok"
     @devices = []
   end
 
   def status
+    @status_starts << @clock.monotonic if @clock
     @status_calls += 1
+    simulate_delay
     raise @status_error if @status_error
     @status_response || { "devices" => @devices }
+  end
+
+  def simulate_delay
+    @clock.advance(@status_delay) if @clock && @status_delay
   end
 
   def chat(text)
@@ -84,6 +88,28 @@ class FakeApi
     @gate.pop if @gate
     raise @chat_error if @chat_error
     @chat_response || { "reply" => @reply, "action" => "model" }
+  end
+end
+
+class FakeClock
+  attr_reader :sleeps, :now
+
+  def initialize
+    @now = 0.0
+    @sleeps = []
+  end
+
+  def monotonic
+    @now
+  end
+
+  def sleep(seconds)
+    @sleeps << seconds
+    @now += seconds
+  end
+
+  def advance(seconds)
+    @now += seconds
   end
 end
 
@@ -137,5 +163,37 @@ module TestHelpers
   def state_with(overrides = {})
     { :devices => [], :reply => "", :status => "ready",
       :input => "", :thinking => false }.merge(overrides)
+  end
+
+  def build_dashboard(api = FakeApi.new, input = FakeInput.new)
+    screen = FakeScreen.new
+    [Dashboard.new(api, screen, input), screen, input]
+  end
+
+  def refresh(dashboard)
+    dashboard.poll_status
+    dashboard.tick
+  end
+
+  def draw_after_status(dashboard)
+    dashboard.poll_status
+    dashboard.tick
+    dashboard.tick
+  end
+
+  def submit_chat(api, dashboard, text, count = 1)
+    dashboard.submit(text)
+    wait_until { api.chat_calls >= count }
+  end
+
+  def release_chat(api, dashboard)
+    api.gate << true
+    wait_until { dashboard.pending_result? }
+  end
+
+  def deliver_chat(api, dashboard, text, count)
+    submit_chat(api, dashboard, text, count)
+    release_chat(api, dashboard)
+    dashboard.tick
   end
 end

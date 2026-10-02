@@ -9,18 +9,14 @@ class ScreenTest < Minitest::Test
   end
 
   def test_renders_registered_device_by_name
-    device = { "name" => "nas", "ip" => "192.168.33.5",
-               "online" => true, "registered" => true }
-    output = @screen.render(state_with(:devices => [device]))
+    output = @screen.render(state_with(:devices => [device("nas", true)]))
     assert_includes output, "nas"
     assert_includes output, "192.168.33.5"
   end
 
   def test_renders_unregistered_device_by_ip
-    device = { "name" => "unknown", "ip" => "192.168.33.9",
-               "online" => false, "registered" => false }
-    output = @screen.render(state_with(:devices => [device]))
-    assert_includes output, "192.168.33.9"
+    output = @screen.render(state_with(:devices => [device("unknown", false)]))
+    assert_includes output, "192.168.33.5"
     refute_includes output, "unknown"
   end
 
@@ -36,5 +32,26 @@ class ScreenTest < Minitest::Test
     output = @screen.render(state_with(:reply => "hi\e[31mred"))
     refute_includes output, "\e"
     assert_includes output, "hi"
+  end
+
+  def test_sanitizes_status_error
+    output = @screen.render(state_with(:status => "error\e[2Jboom"))
+    refute_includes output, "\e"
+    assert_includes output, "error"
+  end
+
+  def test_sanitizes_device_name
+    output = @screen.render(state_with(:devices => [device("na\e[2Jme", true)]))
+    refute_includes output, "\e"
+    assert_includes output, "name"
+  end
+
+  def test_sanitizes_device_ip
+    output = @screen.render(state_with(:devices => [device("x", false, "1\e[2J.2")]))
+    refute_includes output, "\e"
+  end
+
+  def device(name, registered, ip = "192.168.33.5")
+    { "name" => name, "ip" => ip, "online" => true, "registered" => registered }
   end
 end

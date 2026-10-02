@@ -30,4 +30,9 @@ class ApiTest < Minitest::Test
     result = Api.new("http://agent:4567", FakeHttp).status
     assert_equal "pc", result["devices"].first["name"]
   end
+
+  def test_trailing_slash_base_url_keeps_api_path
+    Api.new("http://agent:4567/", FakeHttp).status
+    assert_equal "/api/status", FakeHttp.instances.last.sent_request.path
+  end
 end

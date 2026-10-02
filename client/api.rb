@@ -7,7 +7,7 @@ class Api
   CHAT_READ = 180
 
   def initialize(base_url, http = Net::HTTP)
-    @base_url = base_url
+    @base_url = base_url.sub(%r{/+\z}, "")
     @http = http
   end
 

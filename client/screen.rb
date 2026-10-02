@@ -21,7 +21,7 @@ class Screen
   end
 
   def status_line(state)
-    state[:status].to_s
+    Sanitizer.clean(state[:status].to_s)
   end
 
   def device_lines(devices)
