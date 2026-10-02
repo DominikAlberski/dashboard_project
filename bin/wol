@@ -1,0 +1,8 @@
+#!/usr/bin/env ruby
+require_relative "../agent/registry"
+require_relative "../agent/wol"
+
+registry = Agent::Registry.load
+code, message = Agent::Wol.run(ARGV, registry: registry)
+puts message
+exit code
