@@ -6,32 +6,47 @@ module Agent
   class Runner
     def run(argv, timeout)
       io = IO.popen(argv, err: [:child, :out])
-      output = read_with_deadline(io, timeout)
-      output ? success(io, output) : failure(io)
+      capture(io, timeout)
     end
 
     private
 
-    def read_with_deadline(io, timeout)
-      Timeout.timeout(timeout) { io.read }
+    def capture(io, timeout)
+      output, success = Timeout.timeout(timeout) { collect(io) }
+      { success: success, output: output }
     rescue Timeout::Error
-      nil
+      terminate(io)
     end
 
-    def success(io, output)
+    def collect(io)
+      output = io.read
       io.close
-      { success: $?.success?, output: output }
+      [output, $?.success?]
     end
 
-    def failure(io)
+    def terminate(io)
       kill(io)
-      io.close
+      reap(io)
       { success: false, output: "" }
     end
 
     def kill(io)
       Process.kill("KILL", io.pid)
     rescue Errno::ESRCH
+      nil
+    end
+
+    def reap(io)
+      Process.wait(io.pid)
+    rescue Errno::ECHILD
+      nil
+    ensure
+      close_io(io)
+    end
+
+    def close_io(io)
+      io.close unless io.closed?
+    rescue IOError, Errno::ECHILD
       nil
     end
   end

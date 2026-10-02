@@ -12,19 +12,14 @@ module Agent
     end
 
     def scan_now
-      await_worker
-      status
+      worker = worker_thread
+      response = worker.value
+      clear_worker(worker)
+      response
     end
 
     def status
-      @mutex.synchronize do
-        { devices: @published[:devices], agent: agent_status }.freeze
-      end
-    end
-
-    def agent_status
-      { started_at: @started_at, last_scan_at: @published[:last_scan_at],
-        scanning: @scanning, last_scan_error: @last_scan_error }.freeze
+      @mutex.synchronize { response }
     end
 
     def start
@@ -38,6 +33,15 @@ module Agent
     end
 
     private
+
+    def response
+      { devices: @published[:devices], agent: agent_status }.freeze
+    end
+
+    def agent_status
+      { started_at: @started_at, last_scan_at: @published[:last_scan_at],
+        scanning: @scanning, last_scan_error: @last_scan_error }.freeze
+    end
 
     def setup_state
       @mutex = Mutex.new
@@ -53,12 +57,6 @@ module Agent
 
     def worker_thread
       @mutex.synchronize { @worker ||= Thread.new { run_scan } }
-    end
-
-    def await_worker
-      thread = worker_thread
-      thread.value
-      clear_worker(thread)
     end
 
     def clear_worker(thread)
@@ -79,11 +77,13 @@ module Agent
     def publish(records)
       state = { devices: @merge.merge(records).freeze, last_scan_at: Time.now.utc.iso8601 }.freeze
       store_state(state)
-      state
     end
 
     def store_state(state)
-      @mutex.synchronize { apply_state(state) }
+      @mutex.synchronize do
+        apply_state(state)
+        response
+      end
     end
 
     def apply_state(state)
@@ -93,12 +93,11 @@ module Agent
     end
 
     def publish_error(message)
-      @mutex.synchronize { apply_error(message) }
-    end
-
-    def apply_error(message)
-      @last_scan_error = message
-      @scanning = false
+      @mutex.synchronize do
+        @last_scan_error = message
+        @scanning = false
+        response
+      end
     end
 
     def background_loop

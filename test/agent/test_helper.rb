@@ -40,11 +40,43 @@ module AgentTest
 
     def initialize
       @sent = []
+      @closed = false
     end
 
     def send(data, flags, host, port)
       @sent << { data: data, flags: flags, host: host, port: port }
       0
     end
+
+    def close
+      @closed = true
+    end
+
+    def closed?
+      @closed
+    end
+  end
+
+  class BehaviorScanner
+    attr_reader :calls
+
+    def initialize(&block)
+      @block = block
+      @calls = 0
+    end
+
+    def scan
+      @calls += 1
+      @block.call
+    end
+  end
+
+  def self.device_registry
+    Agent::Registry.new(
+      [
+        { "name" => "pc", "mac" => "AA:BB:CC:DD:EE:01", "ip" => "192.168.33.10" },
+        { "name" => "nas", "mac" => "AA:BB:CC:DD:EE:02", "ip" => "192.168.33.11" }
+      ]
+    )
   end
 end

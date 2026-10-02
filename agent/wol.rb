@@ -29,6 +29,7 @@ module Agent
     end
 
     def initialize(socket = nil)
+      @owned = socket.nil?
       @socket = socket || broadcast_socket
     end
 
@@ -38,9 +39,15 @@ module Agent
 
     def wake(mac)
       @socket.send(packet(mac), 0, BROADCAST, PORT)
+    ensure
+      close_owned
     end
 
     private
+
+    def close_owned
+      @socket.close if @owned && !@socket.closed?
+    end
 
     def mac_bytes(mac)
       hex = mac.to_s.tr("-", ":").delete(":")

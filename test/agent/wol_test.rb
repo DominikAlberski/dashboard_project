@@ -4,6 +4,12 @@ class WolTest < Minitest::Test
   MAC = "AA:BB:CC:DD:EE:01".freeze
   MAC_BYTES = [0xAA, 0xBB, 0xCC, 0xDD, 0xEE, 0x01].freeze
 
+  class FailingSocket
+    def send(*)
+      raise IOError, "no route to host"
+    end
+  end
+
   def test_the_packet_is_102_bytes_with_the_magic_content
     socket = AgentTest::FakeSocket.new
     Agent::Wol.new(socket).wake(MAC)
@@ -49,11 +55,5 @@ class WolTest < Minitest::Test
 
   def registry
     Agent::Registry.new([{ "name" => "pc", "mac" => MAC, "ip" => "192.168.33.10" }])
-  end
-
-  class FailingSocket
-    def send(*)
-      raise IOError, "no route to host"
-    end
   end
 end

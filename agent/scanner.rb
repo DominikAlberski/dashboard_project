@@ -5,6 +5,7 @@ module Agent
   # Scanner runs one scan. It pings each address in the range, reads the ARP
   # table, and checks the TCP ports of one address.
   class Scanner
+    Error = Class.new(StandardError)
     PING_POOL = 32
     ARP_TIMEOUT = 2
     PORT_TIMEOUT = 1
@@ -67,8 +68,9 @@ module Agent
     end
 
     def arp_table
-      output = @runner.run(["arp", "-an"], ARP_TIMEOUT)[:output]
-      parse_arp(output)
+      result = @runner.run(["arp", "-an"], ARP_TIMEOUT)
+      raise Error, "arp failed" unless result[:success]
+      parse_arp(result[:output])
     end
 
     def parse_arp(output)

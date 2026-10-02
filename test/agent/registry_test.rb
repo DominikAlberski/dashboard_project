@@ -35,6 +35,10 @@ class RegistryTest < Minitest::Test
     assert_raises(Agent::Registry::Error) { Agent::Registry.new([device("ip" => "999.1.1.1")]) }
   end
 
+  def test_rejects_a_cidr_ip
+    assert_raises(Agent::Registry::Error) { Agent::Registry.new([device("ip" => "192.168.33.10/24")]) }
+  end
+
   def test_rejects_duplicate_names
     duplicate = DEVICES + [device("name" => "PC", "mac" => "AA:BB:CC:DD:EE:03")]
     assert_raises(Agent::Registry::Error) { Agent::Registry.new(duplicate) }

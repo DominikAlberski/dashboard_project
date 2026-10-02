@@ -27,6 +27,12 @@ class ScannerTest < Minitest::Test
     end
   end
 
+  class ArpFailRunner
+    def run(_argv, _timeout)
+      { success: false, output: "" }
+    end
+  end
+
   def test_scan_pings_and_reads_the_arp_table
     scanner, = build_scanner(["192.168.33.1"], [])
     records = scanner.scan
@@ -56,7 +62,7 @@ class ScannerTest < Minitest::Test
     records = scanner.scan
     arp_only = records.find { |record| record[:ip] == "192.168.33.10" }
     assert_equal "00:1B:2C:0D:0E:0F", arp_only[:mac]
-    assert_nil records.find { |record| record[:ip] == "192.168.33.11" }
+    assert_nil(records.find { |record| record[:ip] == "192.168.33.11" })
   end
 
   def test_a_normalized_arp_mac_matches_a_registry_device_by_mac
@@ -66,6 +72,13 @@ class ScannerTest < Minitest::Test
     pc = devices.find { |device| device[:name] == "pc" }
     assert_equal "192.168.33.10", pc[:ip]
     assert_equal "00:1B:2C:0D:0E:0F", pc[:mac]
+  end
+
+  def test_scan_raises_when_arp_fails
+    config = Agent::Config.new("scan_range" => "192.168.33.0/30")
+    scanner = Agent::Scanner.new(config, ArpFailRunner.new, AgentTest::FakeConnector.new([]))
+    error = assert_raises(Agent::Scanner::Error) { scanner.scan }
+    assert_match "arp", error.message
   end
 
   private

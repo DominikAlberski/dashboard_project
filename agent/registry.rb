@@ -1,5 +1,4 @@
 require "yaml"
-require "ipaddr"
 
 module Agent
   # Registry loads and validates devices.yml and finds a device by name.
@@ -8,6 +7,7 @@ module Agent
 
     NAME = /\A[a-z0-9][a-z0-9-]{0,31}\z/i
     MAC = /\A([0-9a-fA-F]{2}[:-]){5}[0-9a-fA-F]{2}\z/
+    IPV4 = /\A(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})\z/
     KEYS = [:name, :mac, :ip].freeze
 
     attr_reader :devices
@@ -55,9 +55,8 @@ module Agent
     end
 
     def ip?(value)
-      IPAddr.new(value).ipv4?
-    rescue IPAddr::InvalidAddressError
-      false
+      match = value.to_s.match(IPV4)
+      match && match.captures.all? { |part| part.to_i <= 255 }
     end
   end
 end
