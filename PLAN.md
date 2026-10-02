@@ -5,7 +5,8 @@
 Give a 2009 iPhone 3GS a dashboard that controls a local AI agent.
 The agent watches the home LAN. The user asks the phone in plain English.
 The agent scans devices, pings, checks ports, and wakes machines.
-The model runs open-weight (Gemma 3) on a PC on the LAN.
+The model runs open-weight on a PC on the LAN. `config/agent.yml` sets the model.
+The default is `qwen3.8-ridge-16k:latest`.
 
 ## Architecture
 
@@ -14,7 +15,7 @@ Three parts. Each part runs on a different machine. All parts use Ruby.
 ```
 3GS (Ruby dashboard client)
   └── HTTP LAN ──> Mac (Ruby agent: scan / ping / port / WOL / chat)
-                        └── HTTP LAN ──> PC (ollama → Gemma 3 4B)
+                        └── HTTP LAN ──> PC (ollama → model from config/agent.yml)
 ```
 
 The 3GS is too weak to run a model. It is a remote control.
@@ -43,7 +44,8 @@ Stdlib only. No gems. No curses gem (it may not build on iOS).
 
 ### 3. Model (runs on the PC)
 
-ollama serving Gemma 3 4B. See pitfall P1 below.
+ollama serves the model that `config/agent.yml` names.
+The default is `qwen3.8-ridge-16k:latest`. See pitfall P1 below.
 
 ## API Contract
 
