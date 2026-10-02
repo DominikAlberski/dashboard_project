@@ -4,6 +4,7 @@ require_relative "../../agent/config"
 require_relative "../../agent/registry"
 require_relative "../../agent/runner"
 require_relative "../../agent/scanner"
+require_relative "../../agent/device_merge"
 require_relative "../../agent/snapshot"
 require_relative "../../agent/wol"
 

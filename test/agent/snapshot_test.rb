@@ -55,7 +55,10 @@ class SnapshotTest < Minitest::Test
     peak = 0
     guard = Mutex.new
     scanner = BehaviorScanner.new do
-      guard.synchronize { active += 1; peak = [peak, active].max }
+      guard.synchronize do
+        active += 1
+        peak = [peak, active].max
+      end
       sleep 0.1
       guard.synchronize { active -= 1 }
       []

@@ -1,12 +1,14 @@
 require "time"
 
+require_relative "device_merge"
+
 module Agent
   # Snapshot owns the scan state. Only one scan runs at a time.
   class Snapshot
     def initialize(registry, scanner, config)
-      @registry, @scanner, @config = registry, scanner, config
-      @started_at = Time.now.utc.iso8601; @mutex = Mutex.new
-      reset_state
+      @merge = DeviceMerge.new(registry)
+      @scanner, @config = scanner, config
+      setup_state
     end
 
     def scan_now
@@ -37,18 +39,16 @@ module Agent
 
     private
 
-    def reset_state
-      @published = { devices: initial_devices, last_scan_at: nil }.freeze
+    def setup_state
+      @mutex = Mutex.new
+      @started_at = Time.now.utc.iso8601
+      setup_published
+    end
+
+    def setup_published
+      @published = { devices: @merge.offline_devices.freeze, last_scan_at: nil }.freeze
       @scanning = false
       @last_scan_error = nil
-    end
-
-    def initial_devices
-      @registry.devices.map { |device| entry({ ip: device[:ip], mac: device[:mac], online: false }, true, device[:name]) }
-    end
-
-    def entry(record, registered, name)
-      record.merge(name: name, registered: registered).slice(:name, :ip, :mac, :online, :registered)
     end
 
     def worker_thread
@@ -77,39 +77,28 @@ module Agent
     end
 
     def publish(records)
-      state = { devices: merge_devices(records).freeze, last_scan_at: Time.now.utc.iso8601 }.freeze
-      @mutex.synchronize { @published = state; @last_scan_error = nil; @scanning = false }
+      state = { devices: @merge.merge(records).freeze, last_scan_at: Time.now.utc.iso8601 }.freeze
+      store_state(state)
       state
     end
 
+    def store_state(state)
+      @mutex.synchronize { apply_state(state) }
+    end
+
+    def apply_state(state)
+      @published = state
+      @last_scan_error = nil
+      @scanning = false
+    end
+
     def publish_error(message)
-      @mutex.synchronize { @last_scan_error = message; @scanning = false }
+      @mutex.synchronize { apply_error(message) }
     end
 
-    def merge_devices(records)
-      lookup = build_index(records); used = []
-      registered = @registry.devices.map { |device| registered_entry(device, match(device, lookup), used) }
-      registered + unregistered(records, used)
-    end
-
-    def registered_entry(device, record, used)
-      used << record if record
-      entry(record || { ip: device[:ip], mac: device[:mac], online: false }, true, device[:name])
-    end
-
-    def match(device, lookup)
-      lookup[device[:mac].upcase] || lookup[device[:ip]]
-    end
-
-    def build_index(records)
-      records.each_with_object({}) do |record, map|
-        map[record[:mac].to_s.upcase] = record if record[:mac]; map[record[:ip]] = record
-      end
-    end
-
-    def unregistered(records, used)
-      records.select { |record| record[:online] && !used.include?(record) }
-             .map { |record| entry(record, false, nil) }
+    def apply_error(message)
+      @last_scan_error = message
+      @scanning = false
     end
 
     def background_loop

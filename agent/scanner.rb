@@ -78,8 +78,13 @@ module Agent
     end
 
     def add_arp(table, line)
+      return if line.include?("incomplete")
       match = line.match(/\((\d+\.\d+\.\d+\.\d+)\) at ([0-9a-fA-F:]+)/)
-      table[match[1]] = match[2] if match
+      table[match[1]] = normalize_mac(match[2]) if match
+    end
+
+    def normalize_mac(text)
+      text.split(":").map { |octet| octet.rjust(2, "0") }.join(":").upcase
     end
 
     def build_records(addresses, reachable, table)

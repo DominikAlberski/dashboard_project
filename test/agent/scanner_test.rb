@@ -6,6 +6,11 @@ class ScannerTest < Minitest::Test
     ? (192.168.33.2) at aa:bb:cc:dd:ee:02 on en0 ifscope [ethernet]
   ARP
 
+  REAL_ARP_OUTPUT = <<~ARP
+    ? (192.168.33.10) at 0:1b:2c:d:e:f on en0 ifscope [ethernet]
+    ? (192.168.33.11) at (incomplete) on en0 ifscope [ethernet]
+  ARP
+
   class RecordingRunner
     attr_reader :calls
 
@@ -28,7 +33,7 @@ class ScannerTest < Minitest::Test
     answered = records.find { |record| record[:ip] == "192.168.33.1" }
     assert answered[:online]
     arp_only = records.find { |record| record[:ip] == "192.168.33.2" }
-    assert_equal "aa:bb:cc:dd:ee:02", arp_only[:mac]
+    assert_equal "AA:BB:CC:DD:EE:02", arp_only[:mac]
     refute arp_only[:online]
   end
 
@@ -46,11 +51,28 @@ class ScannerTest < Minitest::Test
     assert_equal [80, 443], scanner.check_ports("192.168.33.1")
   end
 
+  def test_normalizes_unpadded_arp_octets_and_skips_incomplete
+    scanner, = build_scanner([], [], REAL_ARP_OUTPUT, "192.168.33.0/24")
+    records = scanner.scan
+    arp_only = records.find { |record| record[:ip] == "192.168.33.10" }
+    assert_equal "00:1B:2C:0D:0E:0F", arp_only[:mac]
+    assert_nil records.find { |record| record[:ip] == "192.168.33.11" }
+  end
+
+  def test_a_normalized_arp_mac_matches_a_registry_device_by_mac
+    scanner, = build_scanner([], [], REAL_ARP_OUTPUT, "192.168.33.0/24")
+    registry = Agent::Registry.new([{ "name" => "pc", "mac" => "00:1B:2C:0D:0E:0F", "ip" => "192.168.33.99" }])
+    devices = Agent::DeviceMerge.new(registry).merge(scanner.scan)
+    pc = devices.find { |device| device[:name] == "pc" }
+    assert_equal "192.168.33.10", pc[:ip]
+    assert_equal "00:1B:2C:0D:0E:0F", pc[:mac]
+  end
+
   private
 
-  def build_scanner(online, open_ports)
-    config = Agent::Config.new("scan_range" => "192.168.33.0/30", "ping_timeout" => 2)
-    runner = RecordingRunner.new(online, ARP_OUTPUT)
+  def build_scanner(online, open_ports, arp_output = ARP_OUTPUT, range = "192.168.33.0/30")
+    config = Agent::Config.new("scan_range" => range, "ping_timeout" => 2)
+    runner = RecordingRunner.new(online, arp_output)
     connector = AgentTest::FakeConnector.new(open_ports)
     [Agent::Scanner.new(config, runner, connector), runner]
   end

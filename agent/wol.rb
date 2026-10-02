@@ -11,6 +11,10 @@ module Agent
     def self.run(argv, registry:, socket: nil)
       mac = resolve(argv[0], registry)
       return [2, USAGE] unless mac
+      deliver(mac, socket)
+    end
+
+    def self.deliver(mac, socket)
       new(socket).wake(mac)
       [0, "sent magic packet to #{mac}"]
     rescue StandardError => error
