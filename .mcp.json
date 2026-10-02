@@ -1,0 +1,11 @@
+{
+  "mcpServers": {
+    "graphify": {
+      "command": "ruby",
+      "args": [
+        ".maf/bin/vault",
+        "mcp"
+      ]
+    }
+  }
+}

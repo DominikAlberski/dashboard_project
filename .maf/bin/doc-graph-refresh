@@ -1,0 +1,257 @@
+#!/usr/bin/env ruby
+# frozen_string_literal: true
+
+# doc-graph-refresh - rebuild the knowledge graph after a markdown change.
+# Usage: .maf/bin/doc-graph-refresh post-commit|post-merge
+
+require "fileutils"
+require "tmpdir"
+require "time"
+
+abort "doc-graph-refresh: Ruby 3.0+ required (current: #{RUBY_VERSION})." if RUBY_VERSION.split(".").first.to_i < 3
+
+module DocGraph
+  # graphify names the output dir under --out "graphify-out".
+  GRAPH = "graphify-out"
+  GRAPH_HOME = ".maf/graphify-out"
+  OBSIDIAN = ".maf/obsidian"
+  LOG = ".maf/coordination/doc-graph.log"
+  LOCK = ".maf/coordination/doc-graph.lock"
+  PENDING = ".maf/coordination/doc-graph.pending"
+  EVENTS = %w[post-commit post-merge].freeze
+  MARKDOWN = /\.md\z/i
+
+  # @param event [String] "post-commit" or "post-merge"
+  # @return [void]
+  def self.run(event)
+    return unless EVENTS.include?(event)
+
+    reason = skip_reason(event)
+    reason ? Log.write("#{event}: #{reason}") : refresh
+  end
+
+  def self.skip_reason(event)
+    return "no markdown change" unless markdown?(event)
+
+    "GEMINI_API_KEY unset, skipped" if ENV["GEMINI_API_KEY"].to_s.empty?
+  end
+
+  def self.markdown?(event)
+    Git.changed(event).any? { |file| file.match?(MARKDOWN) }
+  end
+
+  def self.refresh
+    return Lock.mark_pending unless Lock.acquire
+
+    run_locked([toplevel])
+    recheck
+  end
+
+  def self.run_locked(own)
+    drain(own)
+  ensure
+    Lock.release
+  end
+
+  def self.recheck
+    return unless Lock.pending? && Lock.acquire
+
+    run_locked([])
+    recheck
+  end
+
+  def self.drain(own)
+    trees = (own + Lock.take_pending).uniq
+    return if trees.empty?
+
+    trees.each { |tree| Refresh.run(tree) }
+    drain([])
+  end
+
+  def self.toplevel
+    path = Git.read("rev-parse", "--show-toplevel")
+    path.empty? ? Dir.pwd : path
+  end
+
+  def self.main
+    common = Git.read("rev-parse", "--git-common-dir")
+    common.empty? ? Dir.pwd : File.expand_path("..", common)
+  end
+
+  def self.graph_path = File.join(main, GRAPH_HOME)
+
+  module Git
+    def self.changed(event)
+      args = event == "post-merge" ? ["diff", "--name-only", "ORIG_HEAD", "HEAD"] : changed_commit
+      read(*args).lines.map(&:strip).reject(&:empty?)
+    end
+
+    def self.changed_commit
+      ["diff-tree", "--no-commit-id", "--name-only", "-r", "--root", "-m", "HEAD"]
+    end
+
+    def self.read(*args)
+      IO.popen(["git", *args], err: File::NULL, &:read).strip
+    rescue Errno::ENOENT
+      ""
+    end
+  end
+
+  module Lock
+    TTL = 3600
+
+    def self.acquire
+      FileUtils.mkdir_p(File.dirname(path(LOCK)))
+      take || (break_stale && take)
+    end
+
+    def self.take
+      Dir.mkdir(path(LOCK))
+      File.write(pid_file, Process.pid.to_s)
+      true
+    rescue SystemCallError
+      false
+    end
+
+    def self.break_stale
+      return false unless stale?
+
+      FileUtils.rm_rf(path(LOCK))
+      true
+    end
+
+    def self.stale?
+      holder = holder_pid
+      return holder_dead?(holder) if holder
+
+      Time.now - File.mtime(path(LOCK)) > TTL
+    rescue SystemCallError
+      false
+    end
+
+    def self.holder_dead?(pid)
+      Process.kill(0, pid)
+      Time.now - File.mtime(path(LOCK)) > TTL
+    rescue Errno::ESRCH
+      true
+    rescue SystemCallError
+      false
+    end
+
+    def self.holder_pid
+      Integer(File.read(pid_file).strip)
+    rescue SystemCallError, ArgumentError
+      nil
+    end
+
+    def self.release
+      FileUtils.rm_rf(path(LOCK))
+    end
+
+    def self.mark_pending
+      FileUtils.mkdir_p(File.dirname(path(PENDING)))
+      File.open(path(PENDING), "a") { |io| io.puts(DocGraph.toplevel) }
+      Log.write("refresh already running; marked pending")
+    end
+
+    def self.take_pending
+      taken = "#{path(PENDING)}.#{Process.pid}"
+      File.rename(path(PENDING), taken)
+      File.readlines(taken, chomp: true).reject(&:empty?)
+    rescue Errno::ENOENT
+      []
+    ensure
+      FileUtils.rm_f(taken) if taken
+    end
+
+    def self.pending? = File.exist?(path(PENDING))
+    def self.pid_file = File.join(path(LOCK), "pid")
+    def self.path(name) = File.join(DocGraph.main, name)
+  end
+
+  module Refresh
+    ATTEMPTS = 3
+    RETRY_WAIT = 30
+
+    def self.run(tree)
+      Dir.mktmpdir("doc-graph-refresh") do |tmp|
+        seed(tmp)
+        refresh(tmp, tree)
+      end
+    rescue StandardError => e
+      Log.write("refresh failed: #{e.message}")
+    end
+
+    def self.seed(tmp)
+      graph = DocGraph.graph_path
+      FileUtils.cp_r(graph, File.join(tmp, GRAPH)) if File.exist?(graph)
+    end
+
+    def self.refresh(tmp, tree)
+      return Log.write("extract failed; kept the old graph") unless build(tmp, tree)
+
+      Swap.move(File.join(tmp, GRAPH), DocGraph.graph_path)
+      Export.run
+    end
+
+    def self.build(tmp, tree, attempt = 1)
+      return true if extract_ok?(tmp, tree)
+      return false if attempt >= ATTEMPTS
+
+      Log.write("extract attempt #{attempt} failed; retrying")
+      sleep(retry_wait)
+      build(tmp, tree, attempt + 1)
+    end
+
+    def self.retry_wait = Integer(ENV.fetch("DOC_GRAPH_RETRY_WAIT", RETRY_WAIT))
+
+    def self.extract_ok?(tmp, tree)
+      system({ "GRAPHIFY_OUT" => nil }, "graphify", "extract", tree, "--backend", "gemini", "--max-concurrency", "1", "--out", tmp) &&
+        File.exist?(File.join(tmp, GRAPH, "graph.json"))
+    end
+  end
+
+  module Swap
+    def self.move(fresh, dest)
+      old = "#{dest}.old"
+      FileUtils.rm_rf(old)
+      FileUtils.mv(dest, old) if File.exist?(dest)
+      install(fresh, dest, old)
+    end
+
+    def self.install(fresh, dest, old)
+      FileUtils.mv(fresh, dest)
+      FileUtils.rm_rf(old)
+    rescue SystemCallError
+      FileUtils.mv(old, dest) if File.exist?(old)
+      raise
+    end
+  end
+
+  module Export
+    def self.run
+      graph_path = DocGraph.graph_path
+      Dir.chdir(DocGraph.main) { system({ "GRAPHIFY_OUT" => graph_path }, "graphify", "export", "obsidian", "--dir", OBSIDIAN) }
+    end
+  end
+
+  module Log
+    def self.write(message)
+      File.open(path, "a") { |io| io.puts("#{Time.now.utc.iso8601} #{message}") }
+    rescue SystemCallError
+      nil
+    end
+
+    def self.path
+      path = File.join(DocGraph.main, DocGraph::LOG)
+      FileUtils.mkdir_p(File.dirname(path))
+      path
+    end
+  end
+end
+
+begin
+  DocGraph.run(ARGV.first)
+rescue StandardError => e
+  warn "doc-graph-refresh: #{e.message}"
+end

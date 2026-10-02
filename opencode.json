@@ -1,0 +1,14 @@
+{
+  "$schema": "https://opencode.ai/config.json",
+  "mcp": {
+    "graphify": {
+      "type": "local",
+      "command": [
+        "ruby",
+        ".maf/bin/vault",
+        "mcp"
+      ],
+      "enabled": true
+    }
+  }
+}

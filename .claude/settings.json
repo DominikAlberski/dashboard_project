@@ -1,0 +1,41 @@
+{
+  "hooks": {
+    "Stop": [
+      {
+        "matcher": "",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "ruby .maf/coordination/harness-hooks/next-task.rb"
+          }
+        ]
+      },
+      {
+        "matcher": "",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "ruby .maf/coordination/harness-hooks/board-watch.rb",
+            "async": true,
+            "asyncRewake": true,
+            "timeout": 604800
+          }
+        ]
+      }
+    ],
+    "SessionStart": [
+      {
+        "matcher": "",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "ruby .maf/coordination/harness-hooks/board-watch.rb",
+            "async": true,
+            "asyncRewake": true,
+            "timeout": 604800
+          }
+        ]
+      }
+    ]
+  }
+}

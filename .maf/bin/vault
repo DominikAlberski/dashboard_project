@@ -1,0 +1,230 @@
+#!/usr/bin/env ruby
+# frozen_string_literal: true
+
+# vault - shared knowledge base watcher (graphify + Obsidian + MCP).
+#
+# Usage: vault [start|export|stop|status|age|mcp]
+#   vault           # start the watcher (default); no-op if already running
+#   vault export    # regenerate the Obsidian vault once, then exit
+#   vault stop
+#   vault status
+#   vault age [--json]  # commits since the graph was built, and whether the graph is stale
+#   vault mcp       # exec the stdio MCP server (for an MCP client config)
+#
+# graphify 0.9 removed the --obsidian/--obsidian-dir/--watch/--mcp flags. The
+# current CLI is subcommand-based:
+#   graphify extract . --code-only          initial code graph, no LLM
+#   graphify update .                       incremental code re-extract, no LLM
+#   graphify export obsidian --dir .maf/obsidian  Obsidian notes + graph.canvas
+#   graphify-mcp                            stdio MCP server, spawned by the client
+# The watcher polls `graphify update` and re-exports at VAULT_POLL seconds, so
+# it does not need graphify's optional `watchdog` dependency. Keep `.maf/obsidian/`
+# and `.maf/graphify-out/` in .gitignore (bootstrap adds them): graphify honors
+# .gitignore, so this stops the watcher from re-ingesting its own output.
+#
+# Started automatically by bootstrap.rb when graphify is on PATH. Run by hand
+# after installing graphify if it was not on PATH at bootstrap time.
+
+require "fileutils"
+require "json"
+require "rbconfig"
+
+abort "vault: Ruby 3.0+ required (current: #{RUBY_VERSION})." if RUBY_VERSION.split(".").first.to_i < 3
+
+module Vault
+  # The Obsidian output dir must not share a name with this launcher script:
+  # `graphify export obsidian --dir vault` fails with FileExistsError because
+  # the `vault` file is already there.
+  DIR = File.join(".maf", "obsidian")
+  GRAPH_DIR = File.join(".maf", "graphify-out")
+  GRAPH = File.join(GRAPH_DIR, "graph.json")
+  PID_FILE = ".maf/coordination/vault.pid"
+  LOG_FILE = ".maf/coordination/vault.log"
+  # A garbage or tiny VAULT_POLL would turn the watcher into a busy loop.
+  MIN_POLL = 5
+  POLL = [(ENV["VAULT_POLL"] || 30).to_i, MIN_POLL].max
+  EXTRACT_CMD = ["graphify", "extract", ".", "--code-only"].freeze
+  DOC_GRAPH_LOCK = File.join(".maf", "coordination", "doc-graph.lock")
+  UPDATE_CMD = ["graphify", "update", "."].freeze
+  EXPORT_CMD = ["graphify", "export", "obsidian", "--dir", DIR].freeze
+
+  # Any other argument (or none) starts the watcher.
+  COMMANDS = { "stop" => :stop, "status" => :status, "export" => :export,
+               "mcp" => :mcp, "daemon" => :loop_forever }.freeze
+
+  # Every path of this script is relative to the main checkout, where the graph
+  # and the watcher live. A command from a worktree moves there first.
+  # graphify writes its output where GRAPHIFY_OUT points. Every graphify call
+  # of this script, and of its daemon, inherits the variable.
+  def self.run(argv)
+    Dir.chdir(Daemon.main_root)
+    ENV["GRAPHIFY_OUT"] = File.expand_path(GRAPH_DIR)
+    return age(argv) if argv.first == "age"
+
+    Daemon.public_send(COMMANDS.fetch(argv.first, :start))
+  end
+
+  def self.age(argv)
+    GraphAge.print(json: argv.include?("--json"))
+  end
+
+  # GraphAge counts the commits since the graph was built. The graph is stale
+  # when one of these commits changed a source or markdown file. The build
+  # time is the mtime of graph.json. It never fails: an unreadable state is
+  # reported as "unknown".
+  module GraphAge
+    SOURCE = /\.(md|rb|erb|py|js|jsx|ts|tsx|go|rs|java|kt|swift|c|h|cc|cpp|cs|php|sh|ex|exs|lua|scala)\z/
+
+    def self.state
+      return { state: "missing", commits: nil } unless File.exist?(GRAPH)
+
+      since = "--since=#{File.mtime(GRAPH).to_i}"
+      commits = git("rev-list", "--count", since, "HEAD")&.to_i
+      return { state: "unknown", commits: nil } unless commits
+
+      { state: stale?(since) ? "stale" : "fresh", commits: commits }
+    end
+
+    def self.stale?(since)
+      git("log", since, "--name-only", "--format=").to_s.lines.any? { |line| line.strip.match?(SOURCE) }
+    end
+
+    def self.git(*args)
+      output = IO.popen(["git", *args], err: File::NULL, &:read)
+      $?.success? ? output : nil
+    rescue SystemCallError
+      nil
+    end
+
+    def self.text(data)
+      return "graph age: #{data[:state]}" unless data[:commits]
+
+      "graph age: #{data[:commits]} #{data[:commits] == 1 ? "commit" : "commits"} since build (#{data[:state]})"
+    end
+
+    def self.print(json: false)
+      data = state
+      puts json ? JSON.generate(data) : text(data)
+    end
+  end
+
+  module Daemon
+    def self.start
+      return puts("vault: already running (pid #{Pid.read})") if Pid.running?
+      abort "vault: graphify not found on PATH. Install: pip/uv install graphifyy" unless which("graphify")
+
+      FileUtils.mkdir_p(File.dirname(LOG_FILE))
+      spawn_detached
+    end
+
+    def self.export
+      return puts("vault: #{GRAPH} missing. Run `vault` to build it first.") unless File.exist?(GRAPH)
+
+      system(*EXPORT_CMD) || warn("vault: obsidian export failed; see #{LOG_FILE}")
+    end
+
+    # MCP is a stdio server the client spawns, not a background daemon. Point
+    # an MCP client at this command instead of a long-running process.
+    def self.mcp
+      abort "vault: graphify-mcp not found on PATH. Install: pip/uv install graphifyy" unless which("graphify-mcp")
+      abort "vault: #{GRAPH} missing. Run `vault` to build it first." unless File.exist?(GRAPH)
+
+      Kernel.exec("graphify-mcp", File.expand_path(GRAPH))
+    end
+
+    def self.main_root
+      common = IO.popen(%w[git rev-parse --git-common-dir], err: File::NULL, &:read).to_s.strip
+      common.empty? ? Dir.pwd : File.dirname(File.expand_path(common))
+    rescue SystemCallError
+      Dir.pwd
+    end
+
+    def self.build_initial_graph
+      return if File.exist?(GRAPH)
+
+      puts "vault: no #{GRAPH} yet; building the code graph (no LLM)"
+      system(*EXTRACT_CMD) || warn("vault: graphify extract failed; retrying via update each poll")
+    end
+
+    def self.spawn_detached
+      pid = Process.spawn(RbConfig.ruby, File.expand_path(__FILE__), "daemon",
+                          out: LOG_FILE, err: LOG_FILE, pgroup: true)
+      Process.detach(pid)
+      Pid.write(pid)
+      puts "vault: started (pid #{pid}), log at #{LOG_FILE}"
+    end
+
+    # The daemon builds the first graph itself, so `vault` (and bootstrap)
+    # return at once instead of blocking on a full extract. It exits when the
+    # pid file is gone (`vault stop`, or a removed checkout), so it never
+    # outlives its project.
+    def self.loop_forever
+      Pid.write(Process.pid)
+      build_initial_graph
+      exported_at = nil
+      exported_at = tick(exported_at) while File.exist?(PID_FILE)
+    end
+
+    # One poll: refresh the graph, re-export only when graph.json changed
+    # (Obsidian reloads every rewritten note), then sleep. Returns the graph
+    # mtime that was last exported.
+    def self.tick(exported_at)
+      system(*UPDATE_CMD) unless File.exist?(DOC_GRAPH_LOCK)
+      mtime = File.exist?(GRAPH) ? File.mtime(GRAPH) : nil
+      export if mtime && mtime != exported_at
+      sleep POLL
+      mtime || exported_at
+    end
+
+    def self.stop
+      return puts("vault: not running") unless Pid.running?
+
+      pid = Pid.read
+      Process.kill("TERM", -pid)
+      Pid.clear
+      puts "vault: stopped"
+    end
+
+    def self.status
+      puts Pid.running? ? "vault: running (pid #{Pid.read})" : "vault: not running"
+      puts File.exist?(GRAPH) ? "graph: #{GRAPH}" : "graph: #{GRAPH} missing"
+      puts File.directory?(DIR) ? "obsidian: #{DIR}/" : "obsidian: #{DIR}/ missing"
+      puts GraphAge.text(GraphAge.state)
+    end
+
+    def self.which(bin)
+      ENV.fetch("PATH", "").split(File::PATH_SEPARATOR).any? { |dir| File.executable?(File.join(dir, bin)) }
+    end
+  end
+
+  module Pid
+    def self.running?
+      return false unless File.exist?(PID_FILE)
+
+      pid = read
+      # A corrupt or empty pid file reads as 0; Process.kill(0, 0) would signal
+      # this process's own group, so treat a non-positive pid as not running.
+      return false if pid <= 0
+
+      Process.kill(0, pid)
+      true
+    rescue Errno::ESRCH, Errno::ENOENT, Errno::EINVAL, RangeError
+      false
+    end
+
+    def self.read
+      File.read(PID_FILE).to_i
+    end
+
+    def self.write(pid)
+      FileUtils.mkdir_p(File.dirname(PID_FILE))
+      File.write(PID_FILE, pid)
+    end
+
+    def self.clear
+      File.delete(PID_FILE)
+    end
+  end
+end
+
+Vault.run(ARGV) if __FILE__ == $PROGRAM_NAME
