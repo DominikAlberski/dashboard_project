@@ -7,11 +7,8 @@ class ServerTest < Minitest::Test
   end
 
   def test_status_returns_the_contract
-    devices = [{ name: "pc", ip: "192.168.33.10", mac: nil, online: true, registered: true }]
-    start_server(snapshot: AgentTest::StubSnapshot.new(devices: devices), monitor: AgentTest::StubMonitor.new(true))
-    response = get("/api/status")
-    body = JSON.parse(response.body)
-    assert_equal "200", response.code
+    start_server(snapshot: status_snapshot, monitor: AgentTest::StubMonitor.new(true))
+    body = JSON.parse(get("/api/status").body)
     assert_equal 1, body["devices"].size
     assert_equal true, body["model"]["reachable"]
     assert body["agent"].key?("started_at")
@@ -49,7 +46,31 @@ class ServerTest < Minitest::Test
     assert_equal "done ping pc", action["result"]
   end
 
+  def test_status_answers_during_a_blocked_chat
+    entered = Queue.new
+    gate = Queue.new
+    start_server(chat: blocked_chat(entered, gate))
+    reader = Thread.new { post("/api/chat", '{"text":"hi"}') }
+    entered.pop
+    assert_equal "200", get("/api/status").code
+    gate << true
+    assert_equal "200", reader.value.code
+  end
+
   private
+
+  def status_snapshot
+    device = { name: "pc", ip: "192.168.33.10", mac: nil, online: true, registered: true }
+    AgentTest::StubSnapshot.new(devices: [device])
+  end
+
+  def blocked_chat(entered, gate)
+    AgentTest::StubChat.new do |_text|
+      entered << true
+      gate.pop
+      { reply: "late", action: "model" }
+    end
+  end
 
   def start_server(snapshot: AgentTest::StubSnapshot.new, monitor: AgentTest::StubMonitor.new,
                    chat: AgentTest::StubChat.new, read_timeout: 5)

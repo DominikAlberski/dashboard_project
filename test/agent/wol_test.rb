@@ -10,12 +10,14 @@ class WolTest < Minitest::Test
     end
   end
 
-  def test_the_packet_is_102_bytes_with_the_magic_content
-    socket = AgentTest::FakeSocket.new
-    Agent::Wol.new(socket).wake(MAC)
-    packet = socket.sent.first[:data]
+  def test_the_packet_has_the_magic_header
+    packet = captured_packet
     assert_equal 102, packet.bytesize
     assert_equal [0xFF] * 6, packet.bytes.first(6)
+  end
+
+  def test_the_packet_repeats_the_mac_sixteen_times
+    packet = captured_packet
     assert_equal MAC_BYTES, packet.bytes[6, 6]
     assert_equal MAC_BYTES * 16, packet.bytes[6, 96]
   end
@@ -52,6 +54,12 @@ class WolTest < Minitest::Test
   end
 
   private
+
+  def captured_packet
+    socket = AgentTest::FakeSocket.new
+    Agent::Wol.new(socket).wake(MAC)
+    socket.sent.first[:data]
+  end
 
   def registry
     Agent::Registry.new([{ "name" => "pc", "mac" => MAC, "ip" => "192.168.33.10" }])

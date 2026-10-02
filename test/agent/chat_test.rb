@@ -25,13 +25,14 @@ class ChatTest < Minitest::Test
   class FakeSnapshot
     attr_reader :scans
 
-    def initialize
+    def initialize(error: nil)
       @scans = 0
+      @error = error
     end
 
     def scan_now
       @scans += 1
-      { devices: [] }
+      { devices: [], agent: { last_scan_error: @error } }
     end
   end
 
@@ -63,6 +64,11 @@ class ChatTest < Minitest::Test
   def test_scan_runs_a_scan
     assert_equal "scan complete", chat.perform("scan", nil)
     assert_equal 1, @snapshot.scans
+  end
+
+  def test_scan_reports_a_failed_scan
+    @snapshot = FakeSnapshot.new(error: "arp failed")
+    assert_match "scan failed", chat.perform("scan", nil)
   end
 
   def test_wake_sends_the_registry_mac

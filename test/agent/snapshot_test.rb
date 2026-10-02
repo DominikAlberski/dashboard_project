@@ -17,12 +17,16 @@ class SnapshotTest < Minitest::Test
   end
 
   def test_initial_state_before_the_first_scan
-    status = snapshot_for(AgentTest::BehaviorScanner.new { [] }).status
-    assert_equal 2, status[:devices].size
-    assert(status[:devices].all? { |device| device[:registered] && !device[:online] })
-    assert_nil status[:agent][:last_scan_at]
-    refute status[:agent][:scanning]
-    assert_nil status[:agent][:last_scan_error]
+    agent = snapshot_for(AgentTest::BehaviorScanner.new { [] }).status[:agent]
+    assert_nil agent[:last_scan_at]
+    refute agent[:scanning]
+    assert_nil agent[:last_scan_error]
+  end
+
+  def test_initial_devices_are_offline
+    devices = snapshot_for(AgentTest::BehaviorScanner.new { [] }).status[:devices]
+    assert_equal 2, devices.size
+    assert(devices.all? { |device| device[:registered] && !device[:online] })
   end
 
   def test_a_failed_scan_keeps_the_last_good_state
@@ -68,7 +72,24 @@ class SnapshotTest < Minitest::Test
     assert device(snapshot, "pc")[:online]
   end
 
+  def test_start_scans_at_once
+    started = Queue.new
+    snapshot = snapshot_for(started_scanner(started))
+    snapshot.start
+    started.pop
+    assert snapshot.status[:agent][:last_scan_at]
+  ensure
+    snapshot&.stop
+  end
+
   private
+
+  def started_scanner(started)
+    AgentTest::BehaviorScanner.new do
+      started << true
+      []
+    end
+  end
 
   def scan_with(records)
     snapshot = snapshot_for(AgentTest::BehaviorScanner.new { records })

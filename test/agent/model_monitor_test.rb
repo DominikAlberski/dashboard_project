@@ -1,4 +1,5 @@
 require_relative "test_helper"
+require "timeout"
 
 class ModelMonitorTest < Minitest::Test
   def test_initial_value_is_unknown
@@ -26,11 +27,11 @@ class ModelMonitorTest < Minitest::Test
   end
 
   def test_start_checks_in_the_background
-    queue = Queue.new
-    monitor = Agent::ModelMonitor.new(AgentTest::FakeLlm.new(queue: queue), 0.01)
+    monitor = Agent::ModelMonitor.new(AgentTest::FakeLlm.new(reachable: true), 0.01)
     monitor.start
-    queue.pop
-    monitor.stop
-    assert true
+    Timeout.timeout(2) { sleep 0.01 until monitor.reachable }
+    assert monitor.reachable
+  ensure
+    monitor&.stop
   end
 end

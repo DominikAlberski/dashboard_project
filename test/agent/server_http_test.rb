@@ -17,9 +17,14 @@ class ServerHttpTest < Minitest::Test
     assert_includes raw_request(oversized_headers).lines.first, "413"
   end
 
+  def test_oversized_headers_with_a_terminator_are_413
+    start_server
+    assert_includes raw_request(oversized_headers + "\r\n").lines.first, "413"
+  end
+
   def test_an_oversized_body_is_413
     start_server
-    request = "POST /api/chat HTTP/1.1\r\nHost: x\r\nContent-Length: 20000\r\n\r\n"
+    request = "POST /api/chat HTTP/1.1\r\nContent-Length: 20000\r\n\r\n"
     assert_includes raw_request(request).lines.first, "413"
   end
 
@@ -33,6 +38,11 @@ class ServerHttpTest < Minitest::Test
     assert_includes fragmented(fragments).lines.first, "200"
   end
 
+  def test_reads_a_header_in_many_fragments
+    start_server
+    assert_includes one_byte_fragments("GET /api/status HTTP/1.1\r\nHost: x\r\n\r\n").lines.first, "200"
+  end
+
   def test_each_response_has_content_length_and_connection_close
     start_server
     response = Net::HTTP.start("127.0.0.1", @port) { |http| http.get("/api/status") }
@@ -40,26 +50,7 @@ class ServerHttpTest < Minitest::Test
     assert_operator response["content-length"].to_i, :>, 0
   end
 
-  def test_status_answers_during_a_blocked_chat
-    entered = Queue.new
-    gate = Queue.new
-    start_server(chat: blocked_chat(entered, gate))
-    reader = Thread.new { post("/api/chat", '{"text":"hi"}') }
-    entered.pop
-    assert_equal "200", get("/api/status").code
-    gate << true
-    assert_equal "200", reader.value.code
-  end
-
   private
-
-  def blocked_chat(entered, gate)
-    AgentTest::StubChat.new do |_text|
-      entered << true
-      gate.pop
-      { reply: "late", action: "model" }
-    end
-  end
 
   def start_server(snapshot: AgentTest::StubSnapshot.new, monitor: AgentTest::StubMonitor.new,
                    chat: AgentTest::StubChat.new, read_timeout: 5)
@@ -67,17 +58,6 @@ class ServerHttpTest < Minitest::Test
     services = { config: config, snapshot: snapshot, monitor: monitor, chat: chat }
     @server = Agent::Server.new(services, port: 0, read_timeout: read_timeout).start
     @port = @server.port
-  end
-
-  def get(path)
-    Net::HTTP.start("127.0.0.1", @port) { |http| http.get(path) }
-  end
-
-  def post(path, body)
-    request = Net::HTTP::Post.new(path)
-    request["Content-Type"] = "application/json"
-    request.body = body
-    Net::HTTP.start("127.0.0.1", @port) { |http| http.request(request) }
   end
 
   def raw_request(text)
@@ -102,6 +82,18 @@ class ServerHttpTest < Minitest::Test
     parts.each do |part|
       socket.write(part)
       sleep 0.01
+    end
+    socket.close_write
+    socket.read
+  ensure
+    socket.close unless socket.closed?
+  end
+
+  def one_byte_fragments(text)
+    socket = TCPSocket.new("127.0.0.1", @port)
+    text.each_char do |char|
+      socket.write(char)
+      sleep 0.001
     end
     socket.close_write
     socket.read

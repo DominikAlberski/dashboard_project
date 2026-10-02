@@ -21,10 +21,21 @@ module Agent
 
     def perform(action, target)
       raise Error, "unknown action: #{action}" unless COMMANDS.include?(action)
-      dispatch(action, target)
+      dispatch(action, target_value(action, target))
     end
 
     private
+
+    def target_value(action, target)
+      return scan_target(target) if action == "scan"
+      raise Error, "target is required" unless target.is_a?(String)
+      target
+    end
+
+    def scan_target(target)
+      return nil if target.nil? || target.empty?
+      raise Error, "scan takes no target"
+    end
 
     def dispatch(action, target)
       return scan if action == "scan"
@@ -39,8 +50,9 @@ module Agent
     end
 
     def scan
-      snapshot.scan_now
-      "scan complete"
+      result = snapshot.scan_now
+      error = result.dig(:agent, :last_scan_error)
+      error ? "scan failed: #{error}" : "scan complete"
     end
 
     def wake(target)

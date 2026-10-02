@@ -7,28 +7,36 @@ module Agent
   class Transport
     Error = Class.new(StandardError)
 
-    def post(url, body, timeout, connect_limit)
-      send_request(:post, url, body, timeout, connect_limit)
+    def initialize(http = Net::HTTP)
+      @http = http
     end
 
-    def get(url, timeout, connect_limit)
-      send_request(:get, url, nil, timeout, connect_limit)
+    def post(url, body, options)
+      send_request(:post, url, body, options)
+    end
+
+    def get(url, options)
+      send_request(:get, url, nil, options)
     end
 
     private
 
-    def send_request(method, url, body, timeout, connect_limit)
+    def send_request(method, url, body, options)
       uri = URI.parse(url)
-      Timeout.timeout(timeout) { perform(method, uri, body, timeout, connect_limit) }
+      Timeout.timeout(options.fetch(:timeout)) { perform(method, uri, body, options) }
     rescue StandardError => error
       raise Error, error.message
     end
 
-    def perform(method, uri, body, timeout, connect_limit)
-      Net::HTTP.start(uri.host, uri.port, open_timeout: connect_limit, read_timeout: timeout) do |http|
+    def perform(method, uri, body, options)
+      @http.start(uri.host, uri.port, **timeout_options(options)) do |http|
         response = http.request(build_request(method, uri, body))
         { code: response.code.to_i, body: response.body.to_s }
       end
+    end
+
+    def timeout_options(options)
+      { open_timeout: options.fetch(:connect), read_timeout: options.fetch(:timeout) }
     end
 
     def build_request(method, uri, body)

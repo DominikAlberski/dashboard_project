@@ -108,6 +108,10 @@ module AgentTest
       { devices: @devices,
         agent: { started_at: "t", last_scan_at: nil, scanning: false, last_scan_error: nil } }
     end
+
+    def scan_now
+      status
+    end
   end
 
   class StubMonitor

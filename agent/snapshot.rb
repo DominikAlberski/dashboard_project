@@ -114,8 +114,8 @@ module Agent
     end
 
     def tick
-      sleep @config.scan_interval
       scan_now if @running
+      sleep @config.scan_interval
     end
   end
 end

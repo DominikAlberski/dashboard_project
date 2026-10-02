@@ -10,14 +10,14 @@ class LlmTest < Minitest::Test
       @calls = []
     end
 
-    def post(url, body, timeout, connect_limit)
-      @calls << { url: url, body: body, timeout: timeout, connect_limit: connect_limit }
+    def post(url, body, options)
+      @calls << { url: url, body: body, options: options }
       raise @error if @error
       @response
     end
 
-    def get(url, timeout, connect_limit)
-      @calls << { url: url, timeout: timeout, connect_limit: connect_limit }
+    def get(url, options)
+      @calls << { url: url, options: options }
       raise @error if @error
       @response
     end
@@ -41,8 +41,8 @@ class LlmTest < Minitest::Test
       @seconds = seconds
     end
 
-    def post(_url, _body, timeout, _connect_limit)
-      @clock.advance([@seconds, timeout].min)
+    def post(_url, _body, options)
+      @clock.advance([@seconds, options[:timeout]].min)
       raise Agent::Transport::Error, "timeout"
     end
   end
@@ -57,24 +57,66 @@ class LlmTest < Minitest::Test
     assert_equal "hello", llm_for(transport).chat("hi")
   end
 
-  def test_chat_posts_the_config_model_without_stream
+  def test_chat_posts_to_the_config_model
     transport = reply_transport('{"message":{"content":"ok"}}')
     llm_for(transport).chat("hi")
-    call = transport.calls.first
-    data = JSON.parse(call[:body])
-    assert_equal "http://192.168.33.34:11434/api/chat", call[:url]
-    assert_equal 170, call[:timeout]
-    assert_equal 5, call[:connect_limit]
-    refute data["stream"]
+    data = JSON.parse(transport.calls.first[:body])
+    assert_equal "http://192.168.33.34:11434/api/chat", transport.calls.first[:url]
     assert_equal "qwen3.8-ridge-16k:latest", data["model"]
+    refute data["stream"]
+  end
+
+  def test_chat_sends_the_user_text
+    transport = reply_transport('{"message":{"content":"ok"}}')
+    llm_for(transport).chat("hi")
+    data = JSON.parse(transport.calls.first[:body])
     assert_equal "hi", data["messages"][0]["content"]
+  end
+
+  def test_chat_uses_the_timeout_budget
+    transport = reply_transport('{"message":{"content":"ok"}}')
+    llm_for(transport).chat("hi")
+    options = transport.calls.first[:options]
+    assert_equal 170, options[:timeout]
+    assert_equal 5, options[:connect]
   end
 
   def test_a_slow_model_gives_a_timeout_reply_before_175_seconds
     clock = FakeClock.new
     result = llm_for(SlowTransport.new(clock, 1000)).chat("hi")
     assert_equal Agent::Llm::TIMEOUT_REPLY, result
-    assert_operator clock.now, :<, 175
+    assert_operator clock.now, :<=, 170
+  end
+
+  def test_a_non_success_status_is_a_model_failure
+    transport = FakeTransport.new({ code: 404, body: '{"error":"model missing"}' })
+    assert_equal Agent::Llm::TIMEOUT_REPLY, llm_for(transport).chat("hi")
+  end
+
+  def test_invalid_json_is_a_model_failure
+    transport = FakeTransport.new({ code: 200, body: "not json" })
+    assert_equal Agent::Llm::TIMEOUT_REPLY, llm_for(transport).chat("hi")
+  end
+
+  def test_a_json_array_is_a_model_failure
+    transport = FakeTransport.new({ code: 200, body: "[1, 2]" })
+    assert_equal Agent::Llm::TIMEOUT_REPLY, llm_for(transport).chat("hi")
+  end
+
+  def test_missing_content_is_a_model_failure
+    transport = FakeTransport.new({ code: 200, body: '{"message":{}}' })
+    assert_equal Agent::Llm::TIMEOUT_REPLY, llm_for(transport).chat("hi")
+  end
+
+  def test_a_trailing_slash_model_host_uses_one_slash
+    config = Agent::Config.new("model_host" => "http://host:11434/")
+    transport = reply_transport('{"message":{"content":"ok"}}')
+    llm = Agent::Llm.new(config, transport)
+    llm.chat("hi")
+    llm.reachable?
+    urls = transport.calls.map { |call| call[:url] }
+    assert_includes urls, "http://host:11434/api/chat"
+    assert_includes urls, "http://host:11434/api/tags"
   end
 
   def test_reachable_uses_the_tags_endpoint
@@ -82,8 +124,8 @@ class LlmTest < Minitest::Test
     assert llm_for(transport).reachable?
     call = transport.calls.first
     assert_equal "http://192.168.33.34:11434/api/tags", call[:url]
-    assert_equal 2, call[:timeout]
-    assert_equal 2, call[:connect_limit]
+    assert_equal 2, call[:options][:timeout]
+    assert_equal 2, call[:options][:connect]
   end
 
   def test_reachable_is_false_on_a_transport_error
