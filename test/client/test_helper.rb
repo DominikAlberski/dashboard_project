@@ -61,7 +61,8 @@ class FakeHttp
 end
 
 class FakeApi
-  attr_accessor :reply, :devices, :status_error, :chat_error, :gate
+  attr_accessor :reply, :devices, :status_error, :chat_error, :gate,
+                :status_response, :chat_response
   attr_reader :status_calls, :chat_calls, :last_text
 
   def initialize
@@ -74,7 +75,7 @@ class FakeApi
   def status
     @status_calls += 1
     raise @status_error if @status_error
-    { "devices" => @devices }
+    @status_response || { "devices" => @devices }
   end
 
   def chat(text)
@@ -82,7 +83,7 @@ class FakeApi
     @last_text = text
     @gate.pop if @gate
     raise @chat_error if @chat_error
-    { "reply" => @reply, "action" => "model" }
+    @chat_response || { "reply" => @reply, "action" => "model" }
   end
 end
 

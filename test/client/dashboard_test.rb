@@ -32,16 +32,63 @@ class DashboardTest < Minitest::Test
     api.gate << true
   end
 
-  def test_status_polls_continue_during_chat_wait
+  def test_key_press_does_not_call_status
+    api = FakeApi.new
+    dashboard, = build(api)
+    dashboard.handle_key("a")
+    dashboard.tick
+    assert_equal 0, api.status_calls
+  end
+
+  def test_status_poller_polls_and_pushes
+    api = FakeApi.new
+    api.devices = [{ "name" => "pc" }]
+    queue = Queue.new
+    poller = StatusPoller.new(api, queue)
+    poller.start
+    wait_until { !queue.empty? }
+    poller.stop
+    type, payload = queue.pop
+    assert_equal :status, type
+    assert_equal 1, payload["devices"].size
+  end
+
+  def test_status_poller_interval_is_four_seconds
+    assert_equal 4, StatusPoller::INTERVAL
+  end
+
+  def test_status_update_during_chat_wait
+    api = FakeApi.new
+    api.gate = Queue.new
+    api.devices = [{ "name" => "pc" }]
+    dashboard, = build(api)
+    dashboard.submit("hi")
+    wait_until { api.chat_calls == 1 }
+    dashboard.poll_status
+    dashboard.tick
+    assert_equal 1, dashboard.state[:devices].size
+    assert dashboard.state[:thinking]
+    api.gate << true
+  end
+
+  def test_thinking_status_shows_elapsed_seconds
     api = FakeApi.new
     api.gate = Queue.new
     dashboard, = build(api)
     dashboard.submit("hi")
     wait_until { api.chat_calls == 1 }
-    before = api.status_calls
-    3.times { dashboard.tick }
-    assert_equal before + 3, api.status_calls
-    assert dashboard.state[:thinking]
+    assert_match(/thinking \d+s/, dashboard.state[:status])
+    api.gate << true
+  end
+
+  def test_enter_during_chat_shows_waiting
+    api = FakeApi.new
+    api.gate = Queue.new
+    dashboard, = build(api)
+    dashboard.submit("hi")
+    wait_until { api.chat_calls == 1 }
+    dashboard.handle_key("\r")
+    assert_equal "waiting for reply", dashboard.state[:status]
     api.gate << true
   end
 
@@ -58,6 +105,39 @@ class DashboardTest < Minitest::Test
     dashboard.tick
     assert_equal "hello", dashboard.state[:reply]
     refute dashboard.state[:thinking]
+  end
+
+  def test_chat_error_field_shows_error_text
+    api = FakeApi.new
+    api.chat_response = { "error" => "bad request" }
+    dashboard, = build(api)
+    dashboard.submit("hi")
+    wait_until { dashboard.pending_result? }
+    dashboard.tick
+    assert_equal "bad request", dashboard.state[:reply]
+  end
+
+  def test_status_error_field_shows_error_text
+    api = FakeApi.new
+    api.status_response = { "error" => "no scan" }
+    dashboard, = build(api)
+    dashboard.poll_status
+    dashboard.tick
+    assert_equal "error: no scan", dashboard.state[:status]
+  end
+
+  def test_renders_only_after_a_state_change
+    api = FakeApi.new
+    api.devices = [{ "name" => "pc" }]
+    dashboard, screen, = build(api)
+    dashboard.poll_status
+    dashboard.tick
+    first = screen.draw_count
+    dashboard.tick
+    assert_equal first, screen.draw_count
+    dashboard.handle_key("a")
+    dashboard.draw
+    assert_equal first + 1, screen.draw_count
   end
 
   def test_q_on_empty_input_quits_and_restores
@@ -94,25 +174,5 @@ class DashboardTest < Minitest::Test
     dashboard = Dashboard.new(FakeApi.new, FakeScreen.new, input)
     assert_raises(RuntimeError) { dashboard.run }
     assert_equal 1, input.restore_count
-  end
-
-  def test_renders_only_after_a_state_change
-    api = FakeApi.new
-    dashboard, screen, = build(api)
-    dashboard.tick
-    first = screen.draw_count
-    dashboard.tick
-    assert_equal first, screen.draw_count
-    dashboard.handle_key("a")
-    dashboard.draw
-    assert_equal first + 1, screen.draw_count
-  end
-
-  def test_unreachable_agent_shows_error_status
-    api = FakeApi.new
-    api.status_error = RuntimeError.new("down")
-    dashboard, = build(api)
-    dashboard.tick
-    assert_includes dashboard.state[:status], "error"
   end
 end

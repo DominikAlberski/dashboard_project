@@ -21,7 +21,6 @@ class Screen
   end
 
   def status_line(state)
-    return "thinking..." if state[:thinking]
     state[:status].to_s
   end
 

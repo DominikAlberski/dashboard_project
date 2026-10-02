@@ -28,8 +28,8 @@ class ScreenTest < Minitest::Test
     assert_includes @screen.render(state_with), "(no devices)"
   end
 
-  def test_shows_thinking_indicator
-    assert_includes @screen.render(state_with(:thinking => true)), "thinking"
+  def test_renders_status_line
+    assert_includes @screen.render(state_with(:status => "thinking 2s")), "thinking 2s"
   end
 
   def test_sanitizes_reply

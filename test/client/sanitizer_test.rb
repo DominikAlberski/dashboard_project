@@ -17,6 +17,22 @@ class SanitizerTest < Minitest::Test
     assert_equal "ab", Sanitizer.clean("a\u0080\u009fb")
   end
 
+  def test_removes_whole_csi_sequence
+    assert_equal "ab", Sanitizer.clean("a\e[2Jb")
+  end
+
+  def test_removes_csi_with_parameters
+    assert_equal "ab", Sanitizer.clean("a\e[?25lb")
+  end
+
+  def test_removes_whole_osc_sequence
+    assert_equal "ab", Sanitizer.clean("a\e]0;title\ab")
+  end
+
+  def test_removes_osc_with_string_terminator
+    assert_equal "ab", Sanitizer.clean("a\e]0;title\e\\b")
+  end
+
   def test_keeps_printable_text
     assert_equal "hello world", Sanitizer.clean("hello world")
   end
