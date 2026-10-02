@@ -10,6 +10,7 @@ class Dashboard
     @queue, @chatting, @quit = Queue.new, false, false
     @line = InputLine.new
     @state = empty_state
+    @rendered = nil
   end
 
   def run
@@ -88,6 +89,8 @@ class Dashboard
   end
 
   def draw
+    return if @state == @rendered
+    @rendered = @state
     @screen.draw(@state)
   end
 

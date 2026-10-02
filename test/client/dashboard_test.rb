@@ -96,6 +96,18 @@ class DashboardTest < Minitest::Test
     assert_equal 1, input.restore_count
   end
 
+  def test_renders_only_after_a_state_change
+    api = FakeApi.new
+    dashboard, screen, = build(api)
+    dashboard.tick
+    first = screen.draw_count
+    dashboard.tick
+    assert_equal first, screen.draw_count
+    dashboard.handle_key("a")
+    dashboard.draw
+    assert_equal first + 1, screen.draw_count
+  end
+
   def test_unreachable_agent_shows_error_status
     api = FakeApi.new
     api.status_error = RuntimeError.new("down")

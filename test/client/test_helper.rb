@@ -114,10 +114,15 @@ class RaisingInput < FakeInput
 end
 
 class FakeScreen
-  attr_reader :last_state
+  attr_reader :last_state, :draw_count
+
+  def initialize
+    @draw_count = 0
+  end
 
   def draw(state)
     @last_state = state
+    @draw_count += 1
   end
 end
 
