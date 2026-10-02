@@ -1,0 +1,11 @@
+#!/usr/bin/env ruby
+require_relative "../api"
+require_relative "../sanitizer"
+require_relative "../screen"
+require_relative "../dashboard"
+
+url = ARGV[0] || ENV["AGENT_URL"] || "http://192.168.33.1:4567"
+api = Api.new(url)
+screen = Screen.new($stdout)
+input = RawInput.new($stdin)
+Dashboard.new(api, screen, input).run
