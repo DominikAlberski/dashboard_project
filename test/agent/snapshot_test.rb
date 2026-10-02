@@ -3,6 +3,19 @@ require_relative "test_helper"
 class SnapshotTest < Minitest::Test
   GOOD_RECORDS = [{ ip: "192.168.33.10", mac: "AA:BB:CC:DD:EE:01", online: true }].freeze
 
+  # Each call gives a distinct timestamp, so a failed scan cannot hide a new one.
+  class StepClock
+    def initialize(start)
+      @time = start
+    end
+
+    def call
+      value = @time
+      @time += 10
+      value
+    end
+  end
+
   def test_initial_state_before_the_first_scan
     status = snapshot_for(AgentTest::BehaviorScanner.new { [] }).status
     assert_equal 2, status[:devices].size
@@ -18,12 +31,30 @@ class SnapshotTest < Minitest::Test
     assert device(snapshot, "pc")[:online]
   end
 
-  def test_a_failed_scan_keeps_the_last_scan_time
-    snapshot = scanning_twice([GOOD_RECORDS, :fail])
-    assert snapshot.status[:agent][:last_scan_at]
+  def test_a_failed_scan_keeps_the_last_scan_timestamp
+    snapshot = scanning_twice([GOOD_RECORDS, :fail], StepClock.new(Time.utc(2026, 1, 1)))
+    expected = Time.utc(2026, 1, 1, 0, 0, 10).iso8601
+    assert_equal expected, snapshot.status[:agent][:last_scan_at]
   end
 
-  def test_published_state_is_deeply_frozen
+  def test_agent_metadata_strings_are_frozen
+    agent = scan_with(GOOD_RECORDS).status[:agent]
+    assert agent[:started_at].frozen?
+    assert agent[:last_scan_at].frozen?
+    assert_raises(FrozenError) { agent[:last_scan_at].replace("wrong") }
+  end
+
+  def test_the_initial_started_at_is_frozen
+    agent = snapshot_for(AgentTest::BehaviorScanner.new { [] }).status[:agent]
+    assert agent[:started_at].frozen?
+  end
+
+  def test_the_error_text_is_frozen
+    agent = scanning_twice([GOOD_RECORDS, :fail]).status[:agent]
+    assert agent[:last_scan_error].frozen?
+  end
+
+  def test_published_devices_are_deeply_frozen
     pc = device(scan_with(GOOD_RECORDS), "pc")
     assert pc.frozen?
     assert pc[:name].frozen?
@@ -45,13 +76,13 @@ class SnapshotTest < Minitest::Test
     snapshot
   end
 
-  def scanning_twice(outcomes)
+  def scanning_twice(outcomes, clock = nil)
     scanner = AgentTest::BehaviorScanner.new do
       outcome = outcomes.shift
       raise Agent::Scanner::Error, "arp failed" if outcome == :fail
       outcome
     end
-    snapshot = snapshot_for(scanner)
+    snapshot = snapshot_for(scanner, clock)
     2.times { snapshot.scan_now }
     snapshot
   end
@@ -60,7 +91,8 @@ class SnapshotTest < Minitest::Test
     snapshot.status[:devices].find { |item| item[:name] == name }
   end
 
-  def snapshot_for(scanner)
-    Agent::Snapshot.new(AgentTest.device_registry, scanner, Agent::Config.new("scan_interval" => 5))
+  def snapshot_for(scanner, clock = nil)
+    Agent::Snapshot.new(AgentTest.device_registry, scanner, Agent::Config.new("scan_interval" => 5),
+                        clock || -> { Time.now })
   end
 end

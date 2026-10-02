@@ -5,9 +5,12 @@ require_relative "device_merge"
 module Agent
   # Snapshot owns the scan state. Only one scan runs at a time.
   class Snapshot
-    def initialize(registry, scanner, config)
+    DEFAULT_CLOCK = -> { Time.now }
+
+    def initialize(registry, scanner, config, clock = DEFAULT_CLOCK)
       @merge = DeviceMerge.new(registry)
       @scanner, @config = scanner, config
+      @clock = clock
       setup_state
     end
 
@@ -45,7 +48,7 @@ module Agent
 
     def setup_state
       @mutex = Mutex.new
-      @started_at = Time.now.utc.iso8601
+      @started_at = iso8601(@clock.call)
       setup_published
     end
 
@@ -75,7 +78,7 @@ module Agent
     end
 
     def publish(records)
-      state = { devices: @merge.merge(records).freeze, last_scan_at: Time.now.utc.iso8601 }.freeze
+      state = { devices: @merge.merge(records).freeze, last_scan_at: iso8601(@clock.call) }.freeze
       store_state(state)
     end
 
@@ -94,10 +97,14 @@ module Agent
 
     def publish_error(message)
       @mutex.synchronize do
-        @last_scan_error = message
+        @last_scan_error = message.to_s.dup.freeze
         @scanning = false
         response
       end
+    end
+
+    def iso8601(time)
+      time.utc.iso8601.freeze
     end
 
     def background_loop

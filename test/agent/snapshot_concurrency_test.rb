@@ -48,28 +48,33 @@ class SnapshotConcurrencyTest < Minitest::Test
     assert_equal first.value[:devices], second[:devices]
   end
 
-  def test_each_caller_gets_the_scan_it_awaited
-    gates = [Queue.new, Queue.new]
-    snapshot = snapshot_for(gated_scanner(gates))
-    first = Thread.new { snapshot.scan_now }
-    sleep 0.05
-    second = Thread.new { snapshot.scan_now }
-    sleep 0.05
-    gates[0] << true
-    assert_equal "192.168.33.10", device_ip(first.value, "pc")
-    assert_equal "192.168.33.10", device_ip(second.value, "pc")
+  def test_both_waiters_get_the_same_scan_response
+    first, second, = wait_pair
+    assert_same first, second
+    assert_equal "192.168.33.10", device_ip(first, "pc")
   end
 
-  def test_a_later_scan_returns_its_own_result
-    gates = [Queue.new, Queue.new]
-    snapshot = snapshot_for(gated_scanner(gates))
-    gates[0] << true
+  # A later scan completes, then the delayed caller still holds the first result.
+  def test_a_delayed_caller_keeps_the_first_scan_result
+    first, _second, snapshot, gates = wait_pair
     gates[1] << true
-    assert_equal "192.168.33.10", device_ip(snapshot.scan_now, "pc")
+    assert_equal "192.168.33.10", device_ip(first, "pc")
     assert_equal "192.168.33.99", device_ip(snapshot.scan_now, "pc")
   end
 
   private
+
+  def wait_pair
+    gates = [Queue.new, Queue.new]
+    started = Queue.new
+    snapshot = snapshot_for(gated_scanner(gates, started))
+    first = Thread.new { snapshot.scan_now }
+    started.pop
+    second = Thread.new { snapshot.scan_now }
+    Thread.pass until second.status == "sleep"
+    gates[0] << true
+    [first.value, second.value, snapshot, gates]
+  end
 
   def peak_scanner(peak)
     AgentTest::BehaviorScanner.new do
@@ -80,9 +85,10 @@ class SnapshotConcurrencyTest < Minitest::Test
     end
   end
 
-  def gated_scanner(gates)
+  def gated_scanner(gates, started)
     scanner = AgentTest::BehaviorScanner.new do
       index = scanner.calls - 1
+      started << index
       gates[index].pop
       GATED_RECORDS[index]
     end

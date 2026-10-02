@@ -7,6 +7,11 @@ require_relative "../../agent/scanner"
 require_relative "../../agent/device_merge"
 require_relative "../../agent/snapshot"
 require_relative "../../agent/wol"
+require_relative "../../agent/transport"
+require_relative "../../agent/llm"
+require_relative "../../agent/model_monitor"
+require_relative "../../agent/chat"
+require_relative "../../agent/server"
 
 module AgentTest
   ROOT = File.expand_path("../..", __dir__)
@@ -68,6 +73,65 @@ module AgentTest
     def scan
       @calls += 1
       @block.call
+    end
+  end
+
+  class FakeLlm
+    attr_reader :checks, :messages
+
+    def initialize(reachable: true, reply: "model reply", queue: nil)
+      @reachable = reachable
+      @reply = reply
+      @queue = queue
+      @checks = 0
+      @messages = []
+    end
+
+    def reachable?
+      @checks += 1
+      @queue << true if @queue
+      @reachable
+    end
+
+    def chat(text)
+      @messages << text
+      @reply
+    end
+  end
+
+  class StubSnapshot
+    def initialize(devices: [])
+      @devices = devices
+    end
+
+    def status
+      { devices: @devices,
+        agent: { started_at: "t", last_scan_at: nil, scanning: false, last_scan_error: nil } }
+    end
+  end
+
+  class StubMonitor
+    def initialize(reachable = nil)
+      @reachable = reachable
+    end
+
+    def reachable
+      @reachable
+    end
+  end
+
+  class StubChat
+    def initialize(&block)
+      @block = block
+    end
+
+    def reply(text)
+      @block ? @block.call(text) : { reply: "ok", action: "model" }
+    end
+
+    def perform(action, target)
+      raise Agent::Chat::Error, "unknown action: #{action}" unless %w[ping scan wake ports].include?(action)
+      "done #{action} #{target}"
     end
   end
 

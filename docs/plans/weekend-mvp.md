@@ -229,3 +229,16 @@ The Ollama PC did not answer at the last check. Checks 3 to 5 wait until the PC 
   Manual check 2 measures the real duration. (Finding 5.)
 - Some devices do not answer ping (phones in sleep). Such a device shows offline. The MVP accepts this.
 - The 3GS Ruby version is an assumption. If the client fails on the 3GS, a fix task follows.
+
+## Addendum A — 3GS Ruby version (2026-10-02, after approval)
+
+The user reported a fact. The 3GS runs CRuby 4.0.7. Source: `../docs/device-first-run.md` in the parent project.
+This fact replaces the Ruby 2.0 assumption in Decisions and Risks.
+
+- The client targets CRuby 4.0.7. Modern syntax is allowed.
+- The device build has no `openssl` and no `psych` extension. The client must not require `openssl`, `yaml`, or `psych`.
+- RubyGems does not load automatically on the device. The client must load with `ruby --disable-gems`.
+- The device build stores 64-bit inline caches without atomics. This is safe with one Ruby thread.
+  The GVL makes the risk low with several Ruby threads. The client keeps its threads. Manual check 5 confirms it.
+- The device runs Ruby about 60 times slower than an M1 Mac. The client renders only after a change.
+- Manual check 1 becomes: `ruby --disable-gems -rjson -rio/console -rnet/http -e 'puts RUBY_VERSION'` prints 4.0.7.

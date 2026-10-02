@@ -35,6 +35,11 @@ module Agent
       threads.map(&:value).compact.sort
     end
 
+    def ping(ip)
+      argv = ["ping", "-c", "1", "-W", (@config.ping_timeout * 1000).to_s, ip]
+      @runner.run(argv, @config.ping_timeout + 1)[:success]
+    end
+
     private
 
     def addresses_in_range
@@ -60,11 +65,6 @@ module Agent
       while (ip = queue.pop(true) rescue nil)
         results[ip] = ping(ip)
       end
-    end
-
-    def ping(ip)
-      argv = ["ping", "-c", "1", "-W", (@config.ping_timeout * 1000).to_s, ip]
-      @runner.run(argv, @config.ping_timeout + 1)[:success]
     end
 
     def arp_table

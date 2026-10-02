@@ -1,0 +1,43 @@
+#!/usr/bin/env ruby
+require_relative "../agent/config"
+require_relative "../agent/registry"
+require_relative "../agent/runner"
+require_relative "../agent/scanner"
+require_relative "../agent/snapshot"
+require_relative "../agent/wol"
+require_relative "../agent/transport"
+require_relative "../agent/llm"
+require_relative "../agent/model_monitor"
+require_relative "../agent/chat"
+require_relative "../agent/server"
+
+ROOT = File.expand_path("..", __dir__)
+
+def load_config
+  path = ENV["AGENT_CONFIG"] || File.join(ROOT, "config/agent.yml")
+  Agent::Config.load(path)
+rescue Agent::Config::Error => error
+  warn error.message
+  exit 1
+end
+
+def resolve(path)
+  path.start_with?("/") ? path : File.join(ROOT, path)
+end
+
+config = load_config
+registry = Agent::Registry.load(resolve(config.devices_file))
+runner = Agent::Runner.new
+scanner = Agent::Scanner.new(config, runner)
+snapshot = Agent::Snapshot.new(registry, scanner, config)
+llm = Agent::Llm.new(config, Agent::Transport.new)
+monitor = Agent::ModelMonitor.new(llm)
+chat = Agent::Chat.new({ config: config, registry: registry, scanner: scanner,
+                         snapshot: snapshot, wol: Agent::Wol.new, llm: llm })
+server = Agent::Server.new({ config: config, snapshot: snapshot, monitor: monitor, chat: chat })
+
+monitor.start
+snapshot.start
+server.start
+puts "agent listening on #{config.bind}:#{server.port}"
+sleep
