@@ -13,8 +13,8 @@ module Agent
       @transport = transport
     end
 
-    def chat(text)
-      response = @transport.post(chat_url, body(text), chat_options)
+    def chat(text, system: nil)
+      response = @transport.post(chat_url, body(text, system), chat_options)
       reply = clean(content(response))
       reply.empty? ? TIMEOUT_REPLY : reply
     rescue Transport::Error
@@ -37,9 +37,12 @@ module Agent
       { timeout: REACHABLE_TIMEOUT, connect: REACHABLE_TIMEOUT }
     end
 
-    def body(text)
+    def body(text, system)
+      messages = []
+      messages << { "role" => "system", "content" => system } if system
+      messages << { "role" => "user", "content" => text }
       JSON.generate("model" => @config.model_name, "stream" => false,
-                    "messages" => [{ "role" => "user", "content" => text }])
+                    "messages" => messages)
     end
 
     def content(response)

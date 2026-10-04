@@ -93,8 +93,8 @@ module AgentTest
       @reachable
     end
 
-    def chat(text)
-      @messages << text
+    def chat(text, system: nil)
+      @messages << { text: text, system: system }
       @reply
     end
   end

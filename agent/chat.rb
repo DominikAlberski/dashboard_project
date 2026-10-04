@@ -67,7 +67,21 @@ module Agent
     end
 
     def model_reply(text)
-      { reply: llm.chat(text), action: "model" }
+      { reply: llm.chat(text, system: system_prompt), action: "model" }
+    end
+
+    def system_prompt
+      "You are a LAN overseer. Answer from the device list below only. " \
+        "Keep the answer short. Devices: #{device_summary}"
+    end
+
+    def device_summary
+      snapshot.status[:devices].map { |device| format_device(device) }.join("; ")
+    end
+
+    def format_device(device)
+      name = device[:name] || "unknown"
+      "#{name} #{device[:ip]} #{device[:online] ? 'online' : 'offline'}"
     end
 
     def address(target)

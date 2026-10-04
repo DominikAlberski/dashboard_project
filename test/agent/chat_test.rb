@@ -25,14 +25,19 @@ class ChatTest < Minitest::Test
   class FakeSnapshot
     attr_reader :scans
 
-    def initialize(error: nil)
+    def initialize(error: nil, devices: [])
       @scans = 0
       @error = error
+      @devices = devices
     end
 
     def scan_now
       @scans += 1
-      { devices: [], agent: { last_scan_error: @error } }
+      { devices: @devices, agent: { last_scan_error: @error } }
+    end
+
+    def status
+      { devices: @devices, agent: { last_scan_error: @error } }
     end
   end
 
@@ -116,7 +121,18 @@ class ChatTest < Minitest::Test
   def test_free_text_goes_to_the_model
     result = chat.reply("tell me a joke")
     assert_equal "model", result[:action]
-    assert_equal ["tell me a joke"], @llm.messages
+    assert_equal ["tell me a joke"], @llm.messages.map { |m| m[:text] }
+  end
+
+  def test_free_text_includes_the_live_device_list
+    @snapshot = FakeSnapshot.new(devices: [
+      { name: "pc", ip: "192.168.33.10", online: false },
+      { name: "mac", ip: "192.168.33.11", online: true }
+    ])
+    chat.reply("what is on my network")
+    system = @llm.messages.first[:system]
+    assert_match "pc 192.168.33.10 offline", system
+    assert_match "mac 192.168.33.11 online", system
   end
 
   def test_a_model_timeout_keeps_the_model_action

@@ -73,6 +73,16 @@ class LlmTest < Minitest::Test
     assert_equal "hi", data["messages"][0]["content"]
   end
 
+  def test_chat_prepends_the_system_message
+    transport = reply_transport('{"message":{"content":"ok"}}')
+    llm_for(transport).chat("hi", system: "be brief")
+    data = JSON.parse(transport.calls.first[:body])
+    assert_equal 2, data["messages"].size
+    assert_equal "system", data["messages"][0]["role"]
+    assert_equal "be brief", data["messages"][0]["content"]
+    assert_equal "user", data["messages"][1]["role"]
+  end
+
   def test_chat_uses_the_timeout_budget
     transport = reply_transport('{"message":{"content":"ok"}}')
     llm_for(transport).chat("hi")
