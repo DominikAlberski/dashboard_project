@@ -57,10 +57,11 @@ class PageTest < Minitest::Test
     assert_includes html, "&lt;b&gt;agent&lt;/b&gt;"
   end
 
-  def test_renders_a_form_and_meta_refresh
+  def test_renders_a_form_and_a_refresh_link
     html = Page.new(devices: [], reply: nil, model: model).to_html
     assert_includes html, "method=\"post\""
-    assert_includes html, "http-equiv=\"refresh\""
+    assert_includes html, 'href="/"'
+    refute_includes html, "http-equiv=\"refresh\""
   end
 
   private

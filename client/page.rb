@@ -1,6 +1,4 @@
 class Page
-  REFRESH = 10
-
   def initialize(devices:, reply:, model:)
     @devices = devices
     @reply = reply
@@ -30,12 +28,12 @@ class Page
      "<meta name=\"viewport\" content=\"width=device-width, initial-scale=1\">",
      "<meta name=\"apple-mobile-web-app-capable\" content=\"yes\">",
      "<meta name=\"apple-mobile-web-app-status-bar-style\" content=\"black\">",
-     "<meta http-equiv=\"refresh\" content=\"#{REFRESH}\">",
      "<title>LAN dashboard</title>", "<style>", STYLES, "</style>", "</head>"]
   end
 
   def header
-    ["<h1>LAN dashboard</h1>", "<p class=\"count\">#{device_count}</p>"]
+    ["<h1>LAN dashboard</h1>",
+     "<p class=\"count\">#{device_count} &middot; <a href=\"/\">refresh</a></p>"]
   end
 
   def device_count
