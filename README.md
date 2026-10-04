@@ -46,8 +46,26 @@ Set `OLLAMA_HOST=0.0.0.0` on the PC, so the agent can reach the model.
 
 ## Run the client on the 3GS
 
-The client targets CRuby 4.0.7. The device has no `openssl` and no `psych` extension.
+The client has two forms. The terminal dashboard is for a real terminal. The
+web dashboard runs as a daemon and serves an HTML page for Safari.
+
+Both target CRuby 4.0.7. The device has no `openssl` and no `psych` extension.
 The client must not require them. Load the client with `--disable-gems`.
+
+### Web dashboard (Safari, home screen icon)
+
+The web dashboard serves an HTML page on the 3GS. Safari opens it with no
+JavaScript and no internet connection. It polls the agent over the LAN.
+
+```
+AGENT_URL=http://<mac-ip>:4567 PORT=8081 ruby --disable-gems client/bin/serve
+```
+
+Then open `http://127.0.0.1:8081/` in Safari on the 3GS. Add it to the home
+screen for a full-screen icon. The default bind is `127.0.0.1`, so only the
+device reads the page. The page reloads itself every 10 seconds.
+
+### Terminal dashboard
 
 ```
 AGENT_URL=http://<mac-ip>:4567 ruby --disable-gems client/bin/dashboard

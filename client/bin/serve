@@ -1,0 +1,12 @@
+#!/usr/bin/env ruby
+require_relative "../api"
+require_relative "../page"
+require_relative "../serve"
+
+url = ENV["AGENT_URL"] || "http://192.168.33.16:4567"
+port = (ENV["PORT"] || "8081").to_i
+api = Api.new(url)
+server = Serve.new(api, port: port)
+puts "serving http://127.0.0.1:#{server.port}/ (agent #{url})"
+$stdout.sync = true
+server.run
